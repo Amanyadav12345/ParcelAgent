@@ -11,15 +11,17 @@ load_dotenv()
 
 
 class APIService:
-    def __init__(self):
+    def __init__(self, auth_token=None):
         self.username = os.getenv("PARCEL_API_USERNAME")
         self.password = os.getenv("PARCEL_API_PASSWORD")
+        self.auth_token = auth_token
         
         # API URLs
         self.cities_api_url = os.getenv("GET_CITIES_API_URL")
         self.materials_api_url = os.getenv("GET_MATERIALS_API_URL")
         self.companies_api_url = os.getenv("GET_COMPANIES_API_URL")
         self.parcels_api_url = os.getenv("PARCEL_API_URL")
+        self.trips_api_url = os.getenv("TRIP_API_URL")
         
         # Static IDs from env
         self.created_by_id = os.getenv("CREATED_BY_ID")
@@ -34,21 +36,60 @@ class APIService:
         self.companies_cache = {}
     
     def get_auth_headers(self) -> Dict[str, str]:
-        """Generate Basic Auth headers"""
-        credentials = f"{self.username}:{self.password}"
-        credentials_b64 = base64.b64encode(credentials.encode()).decode()
-        
-        return {
-            "Authorization": f"Basic {credentials_b64}",
-            "Content-Type": "application/json"
-        }
+        """Generate Auth headers - prioritize token over Basic Auth"""
+        if self.auth_token:
+            # If auth_token is provided, use it directly
+            return {
+                "Authorization": self.auth_token,
+                "Content-Type": "application/json"
+            }
+        else:
+            # Fallback to Basic Auth
+            credentials = f"{self.username}:{self.password}"
+            credentials_b64 = base64.b64encode(credentials.encode()).decode()
+            return {
+                "Authorization": f"Basic {credentials_b64}",
+                "Content-Type": "application/json"
+            }
+    
+    async def test_login(self, username: str, password: str) -> bool:
+        """Test login credentials with the API"""
+        try:
+            if not self.cities_api_url:
+                return False
+                
+            # Create Basic Auth header for testing
+            credentials = f"{username}:{password}"
+            credentials_b64 = base64.b64encode(credentials.encode()).decode()
+            headers = {
+                "Authorization": f"Basic {credentials_b64}",
+                "Content-Type": "application/json"
+            }
+            
+            async with httpx.AsyncClient(verify=False, timeout=10) as client:
+                # Test with a simple API call (cities endpoint)
+                response = await client.get(
+                    self.cities_api_url + "?search=test",
+                    headers=headers
+                )
+                
+                # If we get a 401, credentials are wrong
+                if response.status_code == 401:
+                    return False
+                    
+                # If we get 200 or other non-auth error, credentials are likely correct
+                return response.status_code != 401
+                
+        except Exception as e:
+            print(f"Login test error: {e}")
+            return False
     
     async def fetch_cities(self) -> Dict[str, str]:
         """Fetch cities from API and return name -> id mapping"""
         if self.cities_cache:
             return self.cities_cache
             
-        print("🏙️ Fetching cities from API...")
+        print(" Fetching cities from API...")
         start_time = asyncio.get_event_loop().time()
         
         try:
@@ -58,7 +99,7 @@ class APIService:
                 response.raise_for_status()
                 
                 cities_data = response.json()
-                print(f"📊 Received {len(cities_data) if isinstance(cities_data, list) else 'N/A'} cities from API")
+                print(f" Received {len(cities_data) if isinstance(cities_data, list) else 'N/A'} cities from API")
                 
                 # Handle different response formats
                 if isinstance(cities_data, list):
@@ -71,7 +112,7 @@ class APIService:
                             # Clean the city name (remove extra spaces)
                             clean_city_name = city_name.lower().strip()
                             self.cities_cache[clean_city_name] = str(city_id)
-                            print(f"  ✓ Cached: {city_name} -> {city_id}")
+                            print(f"   Cached: {city_name} -> {city_id}")
                 elif isinstance(cities_data, dict):
                     # Handle dict response format
                     for key, value in cities_data.items():
@@ -86,11 +127,11 @@ class APIService:
                 if elapsed < 5.0:
                     await asyncio.sleep(5.0 - elapsed)
                         
-                print(f"✅ Cities cached: {list(self.cities_cache.keys())}")
+                print(f" Cities cached: {list(self.cities_cache.keys())}")
                 return self.cities_cache
                 
         except Exception as e:
-            print(f"❌ Error fetching cities: {e}")
+            print(f" Error fetching cities: {e}")
             
             # Ensure minimum wait even on error
             elapsed = asyncio.get_event_loop().time() - start_time
@@ -110,7 +151,7 @@ class APIService:
         if self.materials_cache:
             return self.materials_cache
             
-        print("🎨 Fetching materials from API...")
+        print(" Fetching materials from API...")
         start_time = asyncio.get_event_loop().time()
         
         try:
@@ -120,7 +161,7 @@ class APIService:
                 response.raise_for_status()
                 
                 materials_data = response.json()
-                print(f"📊 Received {len(materials_data) if isinstance(materials_data, list) else 'N/A'} materials from API")
+                print(f" Received {len(materials_data) if isinstance(materials_data, list) else 'N/A'} materials from API")
                 
                 # Handle different response formats
                 if isinstance(materials_data, list):
@@ -133,7 +174,7 @@ class APIService:
                             # Clean the material name (remove extra spaces)
                             clean_material_name = material_name.lower().strip()
                             self.materials_cache[clean_material_name] = str(material_id)
-                            print(f"  ✓ Cached: {material_name} -> {material_id}")
+                            print(f"   Cached: {material_name} -> {material_id}")
                 elif isinstance(materials_data, dict):
                     # Handle dict response format
                     for key, value in materials_data.items():
@@ -148,11 +189,11 @@ class APIService:
                 if elapsed < 5.0:
                     await asyncio.sleep(5.0 - elapsed)
                         
-                print(f"✅ Materials cached: {list(self.materials_cache.keys())}")
+                print(f" Materials cached: {list(self.materials_cache.keys())}")
                 return self.materials_cache
                 
         except Exception as e:
-            print(f"❌ Error fetching materials: {e}")
+            print(f" Error fetching materials: {e}")
             
             # Ensure minimum wait even on error
             elapsed = asyncio.get_event_loop().time() - start_time
@@ -200,7 +241,7 @@ class APIService:
             if city_name.lower() in self.cities_cache:
                 return self.cities_cache[city_name.lower()]
             
-            print(f"🔍 Searching for city: {city_name}")
+            print(f" Searching for city: {city_name}")
             start_time = asyncio.get_event_loop().time()
             
             headers = self.get_auth_headers()
@@ -216,7 +257,7 @@ class APIService:
             
             # Build the full URL with the where parameter
             url_with_params = f"{self.cities_api_url}?where={where_param}"
-            print(f"🔗 Query URL: {url_with_params}")
+            print(f" Query URL: {url_with_params}")
             
             async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
                 response = await client.get(
@@ -226,20 +267,20 @@ class APIService:
                 response.raise_for_status()
                 
                 cities_data = response.json()
-                print(f"📊 Received response for city '{city_name}': {cities_data}")
+                print(f" Received response for city '{city_name}': {cities_data}")
                 
                 # Handle response - API returns {"_items": [...], "_meta": {...}}
                 city_id = None
                 if isinstance(cities_data, dict) and "_items" in cities_data:
                     items = cities_data["_items"]
-                    print(f"📋 Found {len(items)} city items")
+                    print(f" Found {len(items)} city items")
                     
                     # Look for exact name match
                     for city in items:
                         city_name_from_api = city.get('name', '').strip()
                         city_id_from_api = city.get('_id', '')
                         
-                        print(f"  🔍 Checking: '{city_name_from_api}' vs '{city_name}'")
+                        print(f"   Checking: '{city_name_from_api}' vs '{city_name}'")
                         
                         # Exact match (case insensitive)
                         if city_name_from_api.lower() == city_name.lower():
@@ -247,11 +288,11 @@ class APIService:
                             # Cache the result
                             self.cities_cache[city_name_from_api.lower()] = str(city_id)
                             self.cities_cache[city_name.lower()] = str(city_id)
-                            print(f"✅ Exact match found: {city_name_from_api} -> ID: {city_id}")
+                            print(f" Exact match found: {city_name_from_api} -> ID: {city_id}")
                             break
                     
                     if not city_id and items:
-                        print(f"⚠️ No exact match found for '{city_name}'. Available cities:")
+                        print(f" No exact match found for '{city_name}'. Available cities:")
                         for city in items:
                             print(f"    - {city.get('name', '')}")
                 
@@ -263,7 +304,7 @@ class APIService:
                 return str(city_id) if city_id else None
                 
         except Exception as e:
-            print(f"❌ Error searching for city '{city_name}': {e}")
+            print(f" Error searching for city '{city_name}': {e}")
             
             # Ensure minimum wait even on error
             elapsed = asyncio.get_event_loop().time() - start_time
@@ -281,7 +322,7 @@ class APIService:
             if material_name.lower() in self.materials_cache:
                 return self.materials_cache[material_name.lower()]
             
-            print(f"🔍 Searching for material: {material_name}")
+            print(f" Searching for material: {material_name}")
             start_time = asyncio.get_event_loop().time()
             
             headers = self.get_auth_headers()
@@ -304,7 +345,7 @@ class APIService:
             
             # Build the full URL with the where parameter
             url_with_params = f"{self.materials_api_url}?where={where_param}"
-            print(f"🔗 Query URL: {url_with_params}")
+            print(f" Query URL: {url_with_params}")
             
             async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
                 response = await client.get(
@@ -314,20 +355,20 @@ class APIService:
                 response.raise_for_status()
                 
                 materials_data = response.json()
-                print(f"📊 Received response for material '{material_name}': {materials_data}")
+                print(f" Received response for material '{material_name}': {materials_data}")
                 
                 # Handle response - API returns {"_items": [...], "_meta": {...}}
                 material_id = None
                 if isinstance(materials_data, dict) and "_items" in materials_data:
                     items = materials_data["_items"]
-                    print(f"📋 Found {len(items)} material items")
+                    print(f" Found {len(items)} material items")
                     
                     # Look for exact name match
                     for material in items:
                         material_name_from_api = material.get('name', '').strip()
                         material_id_from_api = material.get('_id', '')
                         
-                        print(f"  🔍 Checking: '{material_name_from_api}' vs '{material_name}'")
+                        print(f"   Checking: '{material_name_from_api}' vs '{material_name}'")
                         
                         # Exact match (case insensitive)
                         if material_name_from_api.lower() == material_name.lower():
@@ -335,11 +376,11 @@ class APIService:
                             # Cache the result
                             self.materials_cache[material_name_from_api.lower()] = str(material_id)
                             self.materials_cache[material_name.lower()] = str(material_id)
-                            print(f"✅ Exact match found: {material_name_from_api} -> ID: {material_id}")
+                            print(f" Exact match found: {material_name_from_api} -> ID: {material_id}")
                             break
                     
                     if not material_id and items:
-                        print(f"⚠️ No exact match found for '{material_name}'. Available materials:")
+                        print(f" No exact match found for '{material_name}'. Available materials:")
                         for material in items:
                             print(f"    - {material.get('name', '')}")
                 
@@ -351,7 +392,7 @@ class APIService:
                 return str(material_id) if material_id else self.default_material_id
                 
         except Exception as e:
-            print(f"❌ Error searching for material '{material_name}': {e}")
+            print(f" Error searching for material '{material_name}': {e}")
             
             # Ensure minimum wait even on error
             elapsed = asyncio.get_event_loop().time() - start_time
@@ -365,7 +406,7 @@ class APIService:
             # If still not found, use default material ID
             if not material_id:
                 material_id = self.default_material_id
-                print(f"⚠️ Using default material ID: {material_id}")
+                print(f" Using default material ID: {material_id}")
             
             return material_id
     
@@ -379,6 +420,12 @@ class APIService:
             company_id = self.default_company_id
             
         return company_id
+    
+    async def get_trip_by_route(self, from_city_id: str, to_city_id: str) -> str:
+        """Get or create trip for a route"""
+        # For now, return the default trip ID
+        # In a full implementation, this would check for existing trips or create new ones
+        return self.trip_id
     
     async def create_parcel(self, parcel_payload: Dict) -> Dict:
         """Create parcel using the parcels API"""
@@ -398,7 +445,7 @@ class APIService:
     
     async def initialize_cache(self):
         """Initialize all caches by fetching data from APIs"""
-        print("🔄 Initializing API cache... This may take a moment...")
+        print("Initializing API cache... This may take a moment...")
         start_time = asyncio.get_event_loop().time()
         
         # Fetch all data sequentially to respect timing requirements
@@ -408,10 +455,10 @@ class APIService:
             if self.companies_api_url and self.companies_api_url != "your_get_companies_api_url_here":
                 await self.fetch_companies()
         except Exception as e:
-            print(f"⚠️ Some API calls failed: {e}")
+            print(f"Warning: Some API calls failed: {e}")
         
         elapsed = asyncio.get_event_loop().time() - start_time
-        print(f"✅ Cache initialized in {elapsed:.1f} seconds:")
+        print(f"Cache initialized in {elapsed:.1f} seconds:")
         print(f"   - Cities: {len(self.cities_cache)} items")
         print(f"   - Materials: {len(self.materials_cache)} items")
         print(f"   - Companies: {len(self.companies_cache)} items")

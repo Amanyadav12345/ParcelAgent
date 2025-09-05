@@ -1,24 +1,27 @@
-# Parcel Agent - CrewAI with Telegram & MCP
+# Parcel Agent - React UI with FastAPI Backend
 
-A simple AI agent system that processes parcel creation requests via Telegram using CrewAI, Gemini, and MCP protocol.
+A modern AI-powered parcel creation system with React frontend and FastAPI backend, using CrewAI, Gemini AI, and direct API integration.
 
 ## Features
 
+- 🎨 **Modern React UI**: Clean, responsive interface with Tailwind CSS
+- ⚡ **FastAPI Backend**: High-performance async API server
 - 🤖 **CrewAI Agent**: Intelligent parcel processing agent
-- 📱 **Telegram Bot**: Natural language parcel requests via Telegram
-- 🔗 **MCP Integration**: Model Context Protocol for API interactions
-- 🧠 **Gemini AI**: Google's Gemini for message understanding
-- 🚚 **Parcel API**: Direct integration with parcel service API
+- 🧠 **Gemini AI**: Google's Gemini for natural language understanding
+- 🚚 **Direct API Integration**: Real-time parcel service API integration
+- 📱 **Dual Input Modes**: Natural language or structured form input
 
 ## Architecture
 
 ```
-Telegram Message → Gemini (NLP) → CrewAI Agent → MCP Server → Parcel API
+React Frontend ↔ FastAPI Backend ↔ Gemini AI ↔ CrewAI Agent ↔ Parcel API
 ```
 
 ## Setup
 
-1. **Clone and install dependencies:**
+### Backend Setup
+
+1. **Install Python dependencies:**
 ```bash
 cd parcel_agent
 pip install -r requirements.txt
@@ -31,53 +34,107 @@ cp .env.example .env
 ```
 
 3. **Required API Keys:**
-- `TELEGRAM_BOT_TOKEN`: Get from @BotFather on Telegram
 - `GEMINI_API_KEY`: Get from Google AI Studio
-- `PARCEL_API_BEARER_TOKEN`: Your parcel service bearer token
+- `PARCEL_API_USERNAME/PASSWORD`: Your parcel service credentials
+- API endpoints for cities, materials, and parcel creation
+
+### Frontend Setup
+
+1. **Install Node.js dependencies:**
+```bash
+cd frontend
+npm install
+```
 
 ## Usage
 
-1. **Start the bot:**
+### Development Mode (Recommended)
+Start both backend and frontend with hot reload:
 ```bash
-python main.py
+python main.py dev
+```
+- Backend: http://localhost:8000
+- Frontend: http://localhost:3000
+- API Docs: http://localhost:8000/docs
+
+### Production Mode
+1. **Build the React frontend:**
+```bash
+cd frontend
+npm run build
 ```
 
-2. **Send a message to your Telegram bot:**
+2. **Start the server:**
+```bash
+python app.py
 ```
-Hi, I want to create a parcel for Berger where route is Jaipur to Kolkata and size of parcel is 100kg and type of material like paint
-```
+- Application: http://localhost:8000
 
-3. **The bot will:**
-   - Parse your message with Gemini
-   - Extract parcel details
-   - Create parcel via MCP → API
-   - Respond with confirmation
+### Using the Application
+
+1. **Open your browser** and navigate to the application
+2. **Choose input method:**
+   - **Natural Language**: Type your parcel request in plain English
+   - **Quick Form**: Use the structured form with dropdowns
+3. **Example natural language input:**
+   ```
+   "Create a parcel for ABC Company from Jaipur to Kolkata, 50kg paint"
+   ```
+4. **The system will:**
+   - Parse your request with Gemini AI
+   - Extract structured parcel details
+   - Look up city/material IDs from APIs
+   - Create the parcel via API
+   - Display confirmation with tracking details
 
 ## Project Structure
 
 ```
 parcel_agent/
-├── main.py                 # Entry point
-├── requirements.txt        # Dependencies
-├── .env.example           # Environment template
+├── app.py                     # FastAPI backend server
+├── main.py                    # Entry point & dev server
+├── requirements.txt           # Python dependencies
+├── .env.example              # Environment template
 ├── src/
 │   ├── agents/
-│   │   └── parcel_agent.py    # CrewAI agent
-│   ├── telegram/
-│   │   └── bot.py             # Telegram bot handler
+│   │   └── parcel_agent.py    # AI agent with Gemini integration
+│   ├── services/
+│   │   └── api_service.py     # API integration service
 │   └── parsers/
 │       └── message_parser.py   # Message parsing utilities
+├── frontend/                  # React frontend
+│   ├── package.json          # Node.js dependencies
+│   ├── src/
+│   │   ├── App.js            # Main React component
+│   │   ├── components/
+│   │   │   ├── ParcelForm.js  # Parcel creation form
+│   │   │   └── ParcelResult.js # Result display
+│   │   └── index.js          # React entry point
+│   └── public/
 └── mcp_server/
-    └── parcel_mcp.py          # MCP server for API integration
+    └── parcel_mcp.py         # MCP server (legacy)
 ```
+
+## API Endpoints
+
+- `GET /` - Root endpoint
+- `GET /health` - Health check
+- `POST /api/create-parcel` - Create parcel from natural language
+- `GET /api/cities` - Get available cities
+- `GET /api/materials` - Get available materials
+- `GET /docs` - Interactive API documentation
 
 ## Supported Cities & Materials
 
-**Cities:** Jaipur, Kolkata  
-**Materials:** Paint
+**Cities:** Dynamic from API (fallback: Jaipur, Kolkata)  
+**Materials:** Dynamic from API (fallback: Paint, Chemicals)
 
-## Example Messages
+## Example Usage
 
+### Natural Language Examples
 - "Create a parcel for ABC Company from Jaipur to Kolkata, 50kg paint"
-- "Hi, I want to create a parcel for Berger where route is Jaipur to Kolkata and size of parcel is 100kg and type of material like paint"
+- "I want to create a parcel for Berger where route is Jaipur to Kolkata and size of parcel is 100kg and type of material like chemicals"
 - "Make a parcel for XYZ Corp, route Kolkata to Jaipur, 25kg paint"
+
+### Quick Form
+Use the toggle in the UI to switch to structured form input with dropdowns for cities, materials, and other fields.

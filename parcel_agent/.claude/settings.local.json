@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(node:*)",
+      "Bash(python:*)",
+      "Bash(py app.py)",
+      "Bash(py -m pip install:*)",
+      "Bash(py:*)",
+      "Bash(\"C:\\Users\\ACSS\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\" app.py)",
+      "Bash(\"C:\\Users\\ACSS\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\" -m pip install fastapi uvicorn)",
+      "Bash(\"C:\\Users\\ACSS\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\" -m pip install python-dotenv)",
+      "Bash(\"C:\\Users\\ACSS\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\" -m pip install google-generativeai httpx requests)",
+      "Bash(curl:*)",
+      "Bash(git checkout:*)",
+      "Bash(sed:*)",
+      "Bash(PORT=3001 npm start)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

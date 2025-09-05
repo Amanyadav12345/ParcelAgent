@@ -11,10 +11,10 @@ load_dotenv()
 
 
 class ParcelAgent:
-    def __init__(self):
+    def __init__(self, auth_token=None):
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        self.model = genai.GenerativeModel('gemini-pro')
-        self.api_service = APIService()
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.api_service = APIService(auth_token=auth_token)
     
     def extract_parcel_info(self, message: str) -> Dict[str, Any]:
         """Use Gemini to extract structured information from message"""
@@ -27,13 +27,16 @@ class ParcelAgent:
             "from_city": "origin city name",
             "to_city": "destination city name", 
             "weight": "weight with unit like '100kg'",
-            "material": "material type mentioned"
+            "material": "material type mentioned",
+            "price": "price/cost mentioned (number only) or null if not mentioned"
         }}
         
         Examples of cities: jaipur, kolkata, mumbai, delhi, chennai, bangalore
         Examples of materials: electronics, furniture, textiles, food items, chemicals, machinery
         
-        IMPORTANT: Do NOT use "paint" as material type. Extract the actual material type mentioned.
+        IMPORTANT: 
+        - Do NOT use "paint" as material type. Extract the actual material type mentioned.
+        - For price, extract only the number if mentioned (e.g., "5000" from "cost is 5000 rupees")
         """
         
         try:
@@ -90,45 +93,84 @@ class ParcelAgent:
                 material = material_match.group(1)
                 break
         
+        # Extract price/cost
+        price_patterns = [
+            r'cost[\s:]+(?:rs\.?\s*|rupees?\s*)?([\d,]+)',
+            r'price[\s:]+(?:rs\.?\s*|rupees?\s*)?([\d,]+)',
+            r'(?:rs\.?\s*|rupees?\s*)([\d,]+)',
+            r'([\d,]+)\s*(?:rs|rupees?)'
+        ]
+        
+        price = None
+        for pattern in price_patterns:
+            price_match = re.search(pattern, message_lower)
+            if price_match:
+                price = int(price_match.group(1).replace(',', ''))
+                break
+        
         return {
             "company": company,
             "from_city": from_city,
             "to_city": to_city,
             "weight": weight,
-            "material": material
+            "material": material,
+            "price": price
         }
+    
+    def get_dynamic_cost(self, parcel_info: Dict[str, Any], weight_kg: float) -> int:
+        """Get dynamic cost based on user input or calculation"""
+        # If price is explicitly mentioned, use it
+        if parcel_info.get('price'):
+            return int(parcel_info['price'])
+        
+        # Simple calculation based on weight and material
+        base_cost = weight_kg * 150  # Rs 150 per kg
+        
+        # Material multiplier
+        material_multipliers = {
+            'electronics': 1.5,
+            'chemicals': 2.0,
+            'machinery': 1.8,
+            'furniture': 1.2,
+        }
+        
+        material = parcel_info.get('material', '').lower()
+        multiplier = material_multipliers.get(material, 1.0)
+        
+        final_cost = int(base_cost * multiplier)
+        return max(final_cost, 500)  # Minimum Rs 500
     
     async def create_parcel(self, parcel_info: Dict[str, Any]) -> str:
         """Create parcel using API service with dynamic ID fetching"""
         try:
             # Extract weight value
             weight_str = parcel_info.get("weight", "100kg")
-            weight_value = int(''.join(filter(str.isdigit, weight_str)))
+            weight_value = float(re.search(r'(\d+)', weight_str).group(1))
             
-            print(f"🔍 Looking up IDs for:")
-            print(f"   - From City: {parcel_info['from_city']}")
-            print(f"   - To City: {parcel_info['to_city']}")
+            print(f"Looking up IDs for:")
+            print(f"   - From: {parcel_info['from_city']}")
+            print(f"   - To: {parcel_info['to_city']}")
             print(f"   - Material: {parcel_info['material']}")
             print(f"   - Company: {parcel_info['company']}")
             
-            # Fetch IDs from APIs (these will wait at least 5 seconds each if needed)
-            print("🏙️ Fetching city information...")
-            from_city_id = await self.api_service.get_city_id(parcel_info["from_city"])
-            to_city_id = await self.api_service.get_city_id(parcel_info["to_city"])
+            # Get IDs dynamically
+            print("Fetching city information...")
+            from_city_id = await self.api_service.get_city_id(parcel_info['from_city'])
+            to_city_id = await self.api_service.get_city_id(parcel_info['to_city'])
             
-            print("🎨 Fetching material information...")
-            material_id = await self.api_service.get_material_id(parcel_info["material"])
+            print("Fetching material information...")
+            material_id = await self.api_service.get_material_id(parcel_info['material'])
             
-            print("🏢 Fetching company information...")
-            company_id = await self.api_service.get_company_id(parcel_info["company"])
+            print("Fetching company information...")
+            company_id = await self.api_service.get_company_id(parcel_info['company'])
             
-            print(f"📋 Found IDs:")
-            print(f"   - From City ID: {from_city_id}")
-            print(f"   - To City ID: {to_city_id}")
-            print(f"   - Material ID: {material_id}")
-            print(f"   - Company ID: {company_id}")
+            print(f"Found IDs:")
+            print(f"   - From City: {from_city_id}")
+            print(f"   - To City: {to_city_id}")
+            print(f"   - Material: {material_id}")
+            print(f"   - Company: {company_id}")
             
-            # Check if required city IDs are found (material has fallback)
+            # Verify required IDs are found
             missing_ids = []
             if not from_city_id:
                 missing_ids.append(f"city '{parcel_info['from_city']}'")
@@ -136,20 +178,31 @@ class ParcelAgent:
                 missing_ids.append(f"city '{parcel_info['to_city']}'")
             
             if missing_ids:
-                return f"❌ Error: Could not find IDs for: {', '.join(missing_ids)}.\nPlease check the spelling or contact support."
+                return f"Error: Could not find IDs for: {', '.join(missing_ids)}.\nPlease check the spelling or contact support."
             
             # Material ID will always have a value (either found or default fallback)
             if not material_id:
                 material_id = self.api_service.default_material_id
-                print(f"⚠️ No material found, using default: {material_id}")
+                print(f"Warning: No material found, using default: {material_id}")
+            
+            # Get or create trip for this route
+            print("Managing trip for route...")
+            trip_id = await self.api_service.get_trip_by_route(from_city_id, to_city_id)
+            print(f"   - Trip ID: {trip_id}")
+            
+            # Calculate dynamic cost
+            calculated_cost = self.get_dynamic_cost(parcel_info, weight_value)
+            print(f"DEBUG: Parcel info extracted: {parcel_info}")
+            print(f"DEBUG: Weight value: {weight_value}")
+            print(f"DEBUG: Calculated cost: {calculated_cost}")
             
             # Create parcel payload
             payload = {
                 "material_type": material_id,
                 "quantity": weight_value,
-                "quantity_unit": "KILOGRAMS",
-                "description": f"Parcel for {parcel_info['company']} - {parcel_info['material']}",
-                "cost": 29997,
+                "quantity_unit": "KILOGRAMS", 
+                "description": None,
+                "cost": calculated_cost,
                 "part_load": False,
                 "pickup_postal_address": {
                     "address_line_1": None,
@@ -167,7 +220,7 @@ class ParcelAgent:
                 },
                 "sender": {
                     "sender_person": None,
-                    "sender_company": company_id if company_id else parcel_info["company"],
+                    "sender_company": None,
                     "name": None,
                     "gstin": None
                 },
@@ -178,44 +231,31 @@ class ParcelAgent:
                     "gstin": None
                 },
                 "created_by": self.api_service.created_by_id,
-                "trip_id": self.api_service.trip_id,
+                "trip_id": trip_id,
                 "verification": "Verified",
                 "created_by_company": self.api_service.created_by_company_id
             }
             
-            print("📦 Creating parcel...")
+            print("Creating parcel...")
             result = await self.api_service.create_parcel(payload)
             
-            return f"✅ Parcel created successfully!\n\n📦 Details:\n- Company: {parcel_info['company']}\n- Route: {parcel_info['from_city'].title()} → {parcel_info['to_city'].title()}\n- Weight: {parcel_info['weight']}\n- Material: {parcel_info['material'].title()}\n\n🆔 Parcel ID: {result.get('id', 'N/A')}\n💰 Cost: ₹{result.get('cost', '29997')}"
+            return f"Parcel created successfully!\n\nDetails:\n- Company: {parcel_info['company']}\n- Route: {parcel_info['from_city'].title()} -> {parcel_info['to_city'].title()}\n- Weight: {parcel_info['weight']}\n- Material: {parcel_info['material'].title()}\n\nParcel ID: {result.get('id', 'N/A')}\nCost: Rs.{calculated_cost}"
                 
         except Exception as e:
-            return f"❌ Error creating parcel: {str(e)}"
+            return f"Error creating parcel: {str(e)}"
     
     async def process_message(self, message: str) -> str:
-        """Main function to process telegram message"""
+        """Process natural language message and create parcel"""
         try:
-            print(f"📨 Processing message: {message}")
+            print(f"Processing message: {message}")
             
             # Extract information using Gemini
             parcel_info = self.extract_parcel_info(message)
-            print(f"🧠 Extracted info: {parcel_info}")
+            print(f"Extracted info: {parcel_info}")
             
             # Create parcel using API service
             result = await self.create_parcel(parcel_info)
-            
             return result
             
         except Exception as e:
-            return f"❌ Error processing message: {str(e)}"
-
-
-# Simplified function for telegram integration
-async def process_telegram_message(message: str) -> str:
-    """Process telegram message and create parcel"""
-    agent = ParcelAgent()
-    
-    # Initialize API cache on first use
-    if not agent.api_service.cities_cache:
-        await agent.api_service.initialize_cache()
-    
-    return await agent.process_message(message)
+            return f"Error processing message: {str(e)}"
