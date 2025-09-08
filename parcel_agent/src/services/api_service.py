@@ -709,46 +709,45 @@ class APIService:
         try:
             headers = self.get_auth_headers()
             
-            # Build parcel payload using the exact format specified
-            # parcel_payload = {
-            #     "material_type": parcel_info.get('material_id', "619c925ee86624fb2a8f410e"),
-            #     "quantity": parcel_info.get('weight', 22),
-            #     "quantity_unit": "TONNES",
-            #     "description": None,
-            #     "cost": parcel_info.get('weight', 22),
-            #     "part_load": False,
-            #     "pickup_postal_address": {
-            #         "address_line_1": "114, Engineering Park Heavi Industrial Area, Hathkhoj Bhilai Durg Chhatisgarh",
-            #         "address_line_2": None,
-            #         "pin": "490026",
-            #         "city": parcel_info.get('from_city_id', "61421aa4de5cb316d9ba569e"),
-            #         "no_entry_zone": None
-            #     },
-            #     "unload_postal_address": {
-            #         "address_line_1": "A-190 C, Rd Number - 1D, Vishwakarma Industrial Area, Jaipur, Rajasthan",
-            #         "address_line_2": None,
-            #         "pin": "302013",
-            #         "city": parcel_info.get('to_city_id', "61421aa1de5cb316d9ba55c0"),
-            #         "no_entry_zone": None
-            #     },
-            #     "sender": {
-            #         "sender_person": "652eda4a8e7383db25404c9d",
-            #         "sender_company": parcel_info.get('company_id', "66976a703eb59f3a8776b7ba"),
-            #         "name": parcel_info.get('company_name', "Balaji Industries Product Limited."),
-            #         "gstin": "22AAACB7092E1Z1"
-            #     },
-            #     "receiver": {
-            #         "receiver_person": "64ca11882b28dbd864e9e8b6",
-            #         "receiver_company": "654160760e415d44ff3e93ff",
-            #         "name": "Anirudh Jethalia",
-            #         "gstin": "08AABCR1634F1ZO"
-            #     },
-            #     "created_by": "6257f1d75b42235a2ae4ab34",
-            #     "trip_id": trip_id,
-            #     "verification": "Verified",
-            #     "created_by_company": "62d66794e54f47829a886a1d"
-            # }
-            #
+            # Build parcel payload using dynamic data from parcel_info
+            parcel_payload = {
+                "material_type": parcel_info.get('material_id', "619c925ee86624fb2a8f410e"),
+                "quantity": parcel_info.get('weight', 22),
+                "quantity_unit": "TONNES",
+                "description": parcel_info.get('description'),
+                "cost": parcel_info.get('weight', 22),
+                "part_load": False,
+                "pickup_postal_address": {
+                    "address_line_1": parcel_info.get('pickup_address', "Default pickup address"),
+                    "address_line_2": None,
+                    "pin": parcel_info.get('pickup_pin', "490026"),
+                    "city": parcel_info.get('from_city_id', "61421aa4de5cb316d9ba569e"),
+                    "no_entry_zone": None
+                },
+                "unload_postal_address": {
+                    "address_line_1": parcel_info.get('delivery_address', "Default delivery address"),
+                    "address_line_2": None,
+                    "pin": parcel_info.get('delivery_pin', "302013"),
+                    "city": parcel_info.get('to_city_id', "61421aa1de5cb316d9ba55c0"),
+                    "no_entry_zone": None
+                },
+                "sender": {
+                    "sender_person": "652eda4a8e7383db25404c9d",
+                    "sender_company": parcel_info.get('company_id', "66976a703eb59f3a8776b7ba"),
+                    "name": parcel_info.get('company_name', "Default Company"),
+                    "gstin": parcel_info.get('sender_gstin', "22AAACB7092E1Z1")
+                },
+                "receiver": {
+                    "receiver_person": "64ca11882b28dbd864e9e8b6",
+                    "receiver_company": "654160760e415d44ff3e93ff",
+                    "name": parcel_info.get('receiver_name', "Default Receiver"),
+                    "gstin": parcel_info.get('receiver_gstin', "08AABCR1634F1ZO")
+                },
+                "created_by": "6257f1d75b42235a2ae4ab34",
+                "trip_id": trip_id,
+                "verification": "Verified",
+                "created_by_company": "62d66794e54f47829a886a1d"
+            }
             logger.info(f"PARCEL_PAYLOAD: Sending to {parcels_api_url}")
             logger.info(f"PARCEL_PAYLOAD: {json.dumps(parcel_payload, indent=2)}")
             
