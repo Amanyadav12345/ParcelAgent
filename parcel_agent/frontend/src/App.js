@@ -93,6 +93,11 @@ function App() {
     }
   };
 
+  const handleClarifyingResponse = async (clarifyingMessage) => {
+    // Append the clarifying response to the previous context and resubmit
+    await handleSubmit(clarifyingMessage);
+  };
+
   const resetForm = () => {
     setResult(null);
     setError(null);
@@ -200,6 +205,7 @@ function App() {
             <ParcelResult 
               result={result} 
               onReset={resetForm}
+              onClarifyingResponse={handleClarifyingResponse}
             />
           )}
         </div>

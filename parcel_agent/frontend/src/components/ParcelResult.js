@@ -1,11 +1,22 @@
 import React, { useState } from 'react';
 
-const ParcelResult = ({ result, onReset }) => {
+const ParcelResult = ({ result, onReset, onClarifyingResponse }) => {
   const [showDetails, setShowDetails] = useState(false);
+  const [clarifyingInput, setClarifyingInput] = useState('');
 
   if (!result) return null;
 
   const { success, message, parcel_info } = result;
+  
+  // Check if this is a clarifying question (starts with ❓)
+  const isClarifyingQuestion = message.startsWith('❓');
+  
+  const handleClarifyingSubmit = () => {
+    if (clarifyingInput.trim() && onClarifyingResponse) {
+      onClarifyingResponse(clarifyingInput.trim());
+      setClarifyingInput('');
+    }
+  };
   
   // Parse the message to extract parcel ID and cost
   const parcelIdMatch = message.match(/Parcel ID: ([^\n]+)/);
@@ -13,6 +24,61 @@ const ParcelResult = ({ result, onReset }) => {
   
   const parcelId = parcelIdMatch ? parcelIdMatch[1] : 'N/A';
   const cost = costMatch ? costMatch[1] : '29997';
+
+  // Handle clarifying questions differently
+  if (isClarifyingQuestion) {
+    return (
+      <div className="result-card bg-white rounded-lg shadow-sm border border-amber-200 p-6">
+        <div className="flex items-start space-x-3 mb-4">
+          <div className="flex-shrink-0">
+            <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+              <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+          </div>
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">More Information Needed</h3>
+            <div className="bg-amber-50 rounded-lg p-4 mb-4">
+              <div className="text-sm text-gray-700 whitespace-pre-wrap">{message}</div>
+            </div>
+            
+            <div className="space-y-3">
+              <label className="block text-sm font-medium text-gray-700">
+                Please provide the missing information:
+              </label>
+              <div className="flex space-x-3">
+                <input
+                  type="text"
+                  value={clarifyingInput}
+                  onChange={(e) => setClarifyingInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleClarifyingSubmit()}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Type your response here..."
+                />
+                <button
+                  onClick={handleClarifyingSubmit}
+                  disabled={!clarifyingInput.trim()}
+                  className="px-4 py-2 bg-blue-500 text-white font-medium rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Submit
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex justify-start pt-4 border-t border-gray-200">
+          <button
+            onClick={onReset}
+            className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 transition-colors"
+          >
+            ← Start Over
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="result-card bg-white rounded-lg shadow-sm border border-gray-200 p-6">

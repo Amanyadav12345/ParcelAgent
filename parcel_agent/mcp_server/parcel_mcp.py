@@ -68,7 +68,7 @@ class ParcelMCPServer:
                             "to_city": {"type": "string"},
                             "weight": {"type": "string"},
                             "material": {"type": "string"},
-                            "cost": {"type": "integer", "default": 29997}
+                            "cost": {"type": "integer"}
                         },
                         "required": ["company", "from_city", "to_city", "weight", "material"]
                     }
@@ -133,7 +133,7 @@ class ParcelMCPServer:
                     "gstin": None
                 },
                 "created_by": "6257f1d75b42235a2ae4ab34",
-                "trip_id": "688062304b74ba99e30075d6",
+                # "trip_id": "688062304b74ba99e30075d6",
                 "verification": "Verified",
                 "created_by_company": "62d66794e54f47829a886a1d"
             }

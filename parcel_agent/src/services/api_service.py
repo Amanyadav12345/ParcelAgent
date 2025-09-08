@@ -4,17 +4,28 @@ import httpx
 import asyncio
 import json
 import urllib.parse
+import logging
+import traceback
 from typing import Dict, Optional, List
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# Configure logging for this module
+logger = logging.getLogger(__name__)
+
 
 class APIService:
     def __init__(self, auth_token=None):
+        logger.info("API_SERVICE: Initializing APIService...")
+        
         self.username = os.getenv("PARCEL_API_USERNAME")
         self.password = os.getenv("PARCEL_API_PASSWORD")
         self.auth_token = auth_token
+        
+        logger.info(f"   Username: {'[SET]' if self.username else '[MISSING]'}")
+        logger.info(f"   Password: {'[SET]' if self.password else '[MISSING]'}")
+        logger.info(f"   Auth token: {'[PROVIDED]' if auth_token else '[NOT_PROVIDED]'}")
         
         # API URLs
         self.cities_api_url = os.getenv("GET_CITIES_API_URL")
@@ -23,6 +34,12 @@ class APIService:
         self.parcels_api_url = os.getenv("PARCEL_API_URL")
         self.trips_api_url = os.getenv("TRIP_API_URL")
         
+        logger.info(f"   Cities API: {'[SET]' if self.cities_api_url else '[MISSING]'}")
+        logger.info(f"   Materials API: {'[SET]' if self.materials_api_url else '[MISSING]'}")
+        logger.info(f"   Companies API: {'[SET]' if self.companies_api_url else '[MISSING]'}")
+        logger.info(f"   Parcels API: {'[SET]' if self.parcels_api_url else '[MISSING]'}")
+        logger.info(f"   Trips API: {'[SET]' if self.trips_api_url else '[MISSING]'}")
+        
         # Static IDs from env
         self.created_by_id = os.getenv("CREATED_BY_ID")
         self.trip_id = os.getenv("TRIP_ID")
@@ -30,10 +47,16 @@ class APIService:
         self.default_company_id = os.getenv("DEFAULT_COMPANY_ID")
         self.default_material_id = os.getenv("DEFAULT_MATERIAL_ID")
         
+        logger.info(f"   Created By ID: {'[SET]' if self.created_by_id else '[MISSING]'}")
+        logger.info(f"   Default Company ID: {'[SET]' if self.default_company_id else '[MISSING]'}")
+        logger.info(f"   Default Material ID: {'[SET]' if self.default_material_id else '[MISSING]'}")
+        
         # Cache for API responses
         self.cities_cache = {}
         self.materials_cache = {}
         self.companies_cache = {}
+        
+        logger.info("API_SERVICE: APIService initialization completed")
     
     def get_auth_headers(self) -> Dict[str, str]:
         """Generate Auth headers - prioritize token over Basic Auth"""
@@ -86,20 +109,36 @@ class APIService:
     
     async def fetch_cities(self) -> Dict[str, str]:
         """Fetch cities from API and return name -> id mapping"""
+        logger.info("CITIES_API: Fetching cities from API...")
+        
         if self.cities_cache:
+            logger.info(f"   CACHE: Using cached cities: {len(self.cities_cache)} items")
             return self.cities_cache
+        
+        if not self.cities_api_url:
+            logger.error("   ERROR: Cities API URL not configured")
+            return {}
             
-        print(" Fetching cities from API...")
         start_time = asyncio.get_event_loop().time()
         
         try:
             headers = self.get_auth_headers()
+            logger.info(f"   HTTP: Making request to: {self.cities_api_url}")
+            logger.debug(f"   AUTH: Headers: {headers}")
+            
             async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
                 response = await client.get(self.cities_api_url, headers=headers)
-                response.raise_for_status()
+                logger.info(f"   HTTP: Response status: {response.status_code}")
+                
+                if response.status_code != 200:
+                    logger.error(f"   ERROR: API request failed: {response.status_code} - {response.text[:200]}")
+                    response.raise_for_status()
                 
                 cities_data = response.json()
-                print(f" Received {len(cities_data) if isinstance(cities_data, list) else 'N/A'} cities from API")
+                data_type = type(cities_data).__name__
+                data_length = len(cities_data) if isinstance(cities_data, (list, dict)) else 'N/A'
+                logger.info(f"   DATA: Received {data_length} cities from API (type: {data_type})")
+                logger.debug(f"   DATA: First few cities: {str(cities_data)[:200]}...")
                 
                 # Handle different response formats
                 if isinstance(cities_data, list):
@@ -131,12 +170,15 @@ class APIService:
                 return self.cities_cache
                 
         except Exception as e:
-            print(f" Error fetching cities: {e}")
+            logger.error(f"   ERROR: Error fetching cities: {str(e)}")
+            logger.error(f"   Stack trace: {traceback.format_exc()}")
             
             # Ensure minimum wait even on error
             elapsed = asyncio.get_event_loop().time() - start_time
-            if elapsed < 5.0:
-                await asyncio.sleep(5.0 - elapsed)
+            remaining_wait = 5.0 - elapsed
+            if remaining_wait > 0:
+                logger.info(f"   WAIT: Waiting {remaining_wait:.1f}s to respect API timing...")
+                await asyncio.sleep(remaining_wait)
             
             # Return fallback values
             fallback_cities = {
@@ -144,6 +186,7 @@ class APIService:
                 "kolkata": "61f925c6a721cdc7bfde1435"
             }
             self.cities_cache.update(fallback_cities)
+            logger.warning(f"   FALLBACK: Using fallback cities: {list(fallback_cities.keys())}")
             return self.cities_cache
     
     async def fetch_materials(self) -> Dict[str, str]:
@@ -422,43 +465,348 @@ class APIService:
         return company_id
     
     async def get_trip_by_route(self, from_city_id: str, to_city_id: str) -> str:
-        """Get or create trip for a route"""
-        # For now, return the default trip ID
-        # In a full implementation, this would check for existing trips or create new ones
-        return self.trip_id
+        """ALWAYS create trip first, then return trip ID for parcel creation"""
+        logger.info(f"TRIP_REQUIRED: Must create/find trip FIRST from {from_city_id} to {to_city_id}")
+        
+        # STEP 1: Always try to create a trip first (this is the required order)
+        if self.trips_api_url:
+            logger.info("TRIP_CREATE: Creating trip FIRST as required by API...")
+            try:
+                trip_id = await self.create_trip_for_route(from_city_id, to_city_id)
+                if trip_id:
+                    logger.info(f"TRIP_SUCCESS: Trip created successfully: {trip_id}")
+                    return trip_id
+            except Exception as e:
+                logger.error(f"TRIP_CREATE_FAILED: Failed to create trip: {str(e)}")
+                
+                # STEP 2: If creation failed, try to search for existing trips
+                logger.info("TRIP_FALLBACK: Trip creation failed, searching for existing trips...")
+                try:
+                    search_url = f"{self.trips_api_url}?where={{\"pickup_postal_address.city\":\"{from_city_id}\",\"unload_postal_address.city\":\"{to_city_id}\"}}"
+                    logger.info(f"   TRIP_SEARCH: {search_url}")
+                    
+                    headers = self.get_auth_headers()
+                    async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                        response = await client.get(search_url, headers=headers)
+                        
+                        if response.status_code == 200:
+                            trips_data = response.json()
+                            if trips_data.get('_items') and len(trips_data['_items']) > 0:
+                                trip_id = trips_data['_items'][0].get('_id')
+                                logger.info(f"   TRIP_FOUND: Using existing trip: {trip_id}")
+                                return trip_id
+                        
+                except Exception as search_error:
+                    logger.error(f"TRIP_SEARCH_FAILED: {str(search_error)}")
+        
+        # STEP 3: Final fallback to environment trip ID (with warning)
+        if self.trip_id:
+            logger.warning(f"TRIP_ENV_FALLBACK: Using environment trip ID: {self.trip_id}")
+            logger.warning("TRIP_WARNING: This may fail if trip doesn't exist in database")
+            return self.trip_id
+        
+        # STEP 4: No options left
+        logger.error("TRIP_FATAL_ERROR: Cannot create, find, or use any trip ID")
+        raise Exception("No valid trip ID available - API requires trip to exist before parcel creation")
+    
+    async def create_trip_for_route(self, from_city_id: str, to_city_id: str) -> str:
+        """Create a new trip using the exact API payload format and extract _id"""
+        logger.info(f"TRIP_API_CALL: Calling trips API - https://35.244.19.78:8042/trips")
+        logger.info(f"TRIP_ROUTE: From {from_city_id} to {to_city_id}")
+        
+        # Use the hardcoded trips API URL as specified
+        trips_api_url = "https://35.244.19.78:8042/trips"
+        
+        try:
+            headers = self.get_auth_headers()
+            
+            # Use the exact payload format you specified
+            trip_payload = {
+                "specific_vehicle_requirements": {
+                    "number_of_wheels": None,
+                    "vehicle_body_type": None,
+                    "axle_type": None,
+                    "expected_price": None
+                },
+                "handled_by": "61421a01de5cb316d9ba4b16",
+                "created_by": "6257f1d75b42235a2ae4ab34",
+                "created_by_company": "62d66794e54f47829a886a1d"
+            }
+            
+            logger.info(f"TRIP_PAYLOAD: Sending to {trips_api_url}")
+            logger.info(f"TRIP_PAYLOAD: {json.dumps(trip_payload, indent=2)}")
+            
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                logger.info("TRIP_HTTP: Making POST request to trip API...")
+                response = await client.post(
+                    trips_api_url,
+                    json=trip_payload,
+                    headers=headers
+                )
+                
+                logger.info(f"TRIP_HTTP: Response status: {response.status_code}")
+                logger.debug(f"TRIP_HTTP: Response headers: {dict(response.headers)}")
+                
+                if response.status_code in [200, 201]:
+                    # Successfully created trip - now extract trip_id from response
+                    result = response.json()
+                    logger.info(f"TRIP_RESPONSE: {json.dumps(result, indent=2)}")
+                    
+                    # Extract trip_id from the API response dynamically
+                    trip_id = None
+                    if isinstance(result, dict):
+                        # Try common field names for trip ID
+                        trip_id = result.get('_id') or result.get('id') or result.get('trip_id')
+                        
+                        if not trip_id:
+                            # Log available fields to help debug
+                            available_fields = list(result.keys())
+                            logger.warning(f"TRIP_ID_EXTRACT: trip_id not found in response fields: {available_fields}")
+                            
+                            # Try to find any field that might contain the trip ID
+                            for field, value in result.items():
+                                if 'id' in field.lower() and isinstance(value, str) and len(value) > 10:
+                                    trip_id = value
+                                    logger.info(f"TRIP_ID_EXTRACT: Using field '{field}' as trip_id: {trip_id}")
+                                    break
+                    
+                    if trip_id:
+                        logger.info(f"TRIP_SUCCESS: Dynamically extracted trip_id: {trip_id}")
+                        return trip_id
+                    else:
+                        logger.error(f"TRIP_ID_ERROR: Could not extract trip_id from response: {result}")
+                        raise Exception(f"Trip created but could not extract trip_id from response: {result}")
+                        
+                else:
+                    logger.error(f"TRIP_API_ERROR: Trip API failed with status: {response.status_code}")
+                    logger.error(f"TRIP_API_ERROR: Response body: {response.text}")
+                    raise Exception(f"Trip API request failed with status {response.status_code}: {response.text}")
+                        
+        except httpx.HTTPStatusError as e:
+            logger.error(f"TRIP_HTTP_ERROR: HTTP error calling trip API: {e.response.status_code}")
+            logger.error(f"TRIP_HTTP_ERROR: Error response: {e.response.text}")
+            raise Exception(f"Trip API HTTP error {e.response.status_code}: {e.response.text}")
+        except Exception as e:
+            logger.error(f"TRIP_ERROR: Error calling trip API: {str(e)}")
+            logger.error(f"TRIP_ERROR: Stack trace: {traceback.format_exc()}")
+            raise Exception(f"Failed to create trip: {str(e)}")
     
     async def create_parcel(self, parcel_payload: Dict) -> Dict:
         """Create parcel using the parcels API"""
+        logger.info("PARCEL_API: Creating parcel via API...")
+        logger.info(f"   URL: API URL: {self.parcels_api_url}")
+        logger.info(f"   PAYLOAD: {json.dumps(parcel_payload, indent=2)}")
+        
         try:
+            if not self.parcels_api_url:
+                logger.error("   ERROR: Parcels API URL not configured")
+                raise Exception("Parcels API URL not configured")
+            
             headers = self.get_auth_headers()
+            logger.debug(f"   AUTH: Headers: {headers}")
+            
             async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                logger.info("   HTTP: Sending POST request to parcels API...")
                 response = await client.post(
                     self.parcels_api_url,
                     json=parcel_payload,
                     headers=headers
                 )
-                response.raise_for_status()
-                return response.json()
                 
+                logger.info(f"   HTTP: Response status: {response.status_code}")
+                logger.debug(f"   HTTP: Response headers: {dict(response.headers)}")
+                
+                if response.status_code != 200:
+                    logger.error(f"   ERROR: API request failed: {response.status_code}")
+                    logger.error(f"   ERROR: Response body: {response.text}")
+                    response.raise_for_status()
+                
+                result = response.json()
+                logger.info(f"   SUCCESS: Parcel created successfully")
+                logger.info(f"   RESPONSE: {json.dumps(result, indent=2)}")
+                return result
+                
+        except httpx.HTTPStatusError as e:
+            logger.error(f"   HTTP_ERROR: HTTP error creating parcel: {e.response.status_code}")
+            logger.error(f"   HTTP_ERROR: Error response: {e.response.text}")
+            raise Exception(f"API request failed with status {e.response.status_code}: {e.response.text}")
         except Exception as e:
+            logger.error(f"   ERROR: Error creating parcel: {str(e)}")
+            logger.error(f"   Stack trace: {traceback.format_exc()}")
             raise Exception(f"Error creating parcel: {str(e)}")
+    
+    async def create_trip(self) -> str:
+        """Create a trip using the trips API without requiring city IDs"""
+        logger.info("TRIP_API: Creating trip via API...")
+        
+        # Use the hardcoded trips API URL as specified
+        trips_api_url = "https://35.244.19.78:8042/trips"
+        
+        try:
+            headers = self.get_auth_headers()
+            
+            # Use the exact payload format as specified
+            trip_payload = {
+                "specific_vehicle_requirements": {
+                    "number_of_wheels": None,
+                    "vehicle_body_type": None,
+                    "axle_type": None,
+                    "expected_price": None
+                },
+                "handled_by": "61421a01de5cb316d9ba4b16",
+                "created_by": "6257f1d75b42235a2ae4ab34",
+                "created_by_company": "62d66794e54f47829a886a1d"
+            }
+            
+            logger.info(f"TRIP_PAYLOAD: Sending to {trips_api_url}")
+            logger.info(f"TRIP_PAYLOAD: {json.dumps(trip_payload, indent=2)}")
+            
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                logger.info("TRIP_HTTP: Making POST request to trip API...")
+                response = await client.post(
+                    trips_api_url,
+                    json=trip_payload,
+                    headers=headers
+                )
+                
+                logger.info(f"TRIP_HTTP: Response status: {response.status_code}")
+                logger.debug(f"TRIP_HTTP: Response headers: {dict(response.headers)}")
+                
+                if response.status_code in [200, 201]:
+                    result = response.json()
+                    logger.info(f"TRIP_RESPONSE: {json.dumps(result, indent=2)}")
+                    
+                    # Extract _id from the response
+                    trip_id = result.get('_id')
+                    if trip_id:
+                        logger.info(f"TRIP_SUCCESS: Trip created with ID: {trip_id}")
+                        return trip_id
+                    else:
+                        logger.error(f"TRIP_ID_ERROR: Could not extract _id from response: {result}")
+                        raise Exception(f"Trip created but could not extract _id from response")
+                        
+                else:
+                    logger.error(f"TRIP_API_ERROR: Trip API failed with status: {response.status_code}")
+                    logger.error(f"TRIP_API_ERROR: Response body: {response.text}")
+                    raise Exception(f"Trip API request failed with status {response.status_code}: {response.text}")
+                        
+        except httpx.HTTPStatusError as e:
+            logger.error(f"TRIP_HTTP_ERROR: HTTP error calling trip API: {e.response.status_code}")
+            logger.error(f"TRIP_HTTP_ERROR: Error response: {e.response.text}")
+            raise Exception(f"Trip API HTTP error {e.response.status_code}: {e.response.text}")
+        except Exception as e:
+            logger.error(f"TRIP_ERROR: Error calling trip API: {str(e)}")
+            logger.error(f"TRIP_ERROR: Stack trace: {traceback.format_exc()}")
+            raise Exception(f"Failed to create trip: {str(e)}")
+    
+    async def create_parcel_with_trip(self, parcel_info: Dict, trip_id: str) -> Dict:
+        """Create parcel using the parcels API with a specific trip_id"""
+        logger.info(f"PARCEL_WITH_TRIP: Creating parcel with trip ID: {trip_id}")
+        
+        # Use the hardcoded parcels API URL as specified  
+        parcels_api_url = "https://35.244.19.78:8042/parcels"
+        
+        try:
+            headers = self.get_auth_headers()
+            
+            # Build parcel payload using the exact format specified
+            # parcel_payload = {
+            #     "material_type": parcel_info.get('material_id', "619c925ee86624fb2a8f410e"),
+            #     "quantity": parcel_info.get('weight', 22),
+            #     "quantity_unit": "TONNES",
+            #     "description": None,
+            #     "cost": parcel_info.get('weight', 22),
+            #     "part_load": False,
+            #     "pickup_postal_address": {
+            #         "address_line_1": "114, Engineering Park Heavi Industrial Area, Hathkhoj Bhilai Durg Chhatisgarh",
+            #         "address_line_2": None,
+            #         "pin": "490026",
+            #         "city": parcel_info.get('from_city_id', "61421aa4de5cb316d9ba569e"),
+            #         "no_entry_zone": None
+            #     },
+            #     "unload_postal_address": {
+            #         "address_line_1": "A-190 C, Rd Number - 1D, Vishwakarma Industrial Area, Jaipur, Rajasthan",
+            #         "address_line_2": None,
+            #         "pin": "302013",
+            #         "city": parcel_info.get('to_city_id', "61421aa1de5cb316d9ba55c0"),
+            #         "no_entry_zone": None
+            #     },
+            #     "sender": {
+            #         "sender_person": "652eda4a8e7383db25404c9d",
+            #         "sender_company": parcel_info.get('company_id', "66976a703eb59f3a8776b7ba"),
+            #         "name": parcel_info.get('company_name', "Balaji Industries Product Limited."),
+            #         "gstin": "22AAACB7092E1Z1"
+            #     },
+            #     "receiver": {
+            #         "receiver_person": "64ca11882b28dbd864e9e8b6",
+            #         "receiver_company": "654160760e415d44ff3e93ff",
+            #         "name": "Anirudh Jethalia",
+            #         "gstin": "08AABCR1634F1ZO"
+            #     },
+            #     "created_by": "6257f1d75b42235a2ae4ab34",
+            #     "trip_id": trip_id,
+            #     "verification": "Verified",
+            #     "created_by_company": "62d66794e54f47829a886a1d"
+            # }
+            #
+            logger.info(f"PARCEL_PAYLOAD: Sending to {parcels_api_url}")
+            logger.info(f"PARCEL_PAYLOAD: {json.dumps(parcel_payload, indent=2)}")
+            
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                logger.info("PARCEL_HTTP: Making POST request to parcels API...")
+                response = await client.post(
+                    parcels_api_url,
+                    json=parcel_payload,
+                    headers=headers
+                )
+                
+                logger.info(f"PARCEL_HTTP: Response status: {response.status_code}")
+                logger.debug(f"PARCEL_HTTP: Response headers: {dict(response.headers)}")
+                
+                if response.status_code in [200, 201]:
+                    result = response.json()
+                    logger.info(f"PARCEL_RESPONSE: {json.dumps(result, indent=2)}")
+                    logger.info(f"PARCEL_SUCCESS: Parcel created successfully")
+                    return result
+                else:
+                    logger.error(f"PARCEL_API_ERROR: Parcels API failed with status: {response.status_code}")
+                    logger.error(f"PARCEL_API_ERROR: Response body: {response.text}")
+                    raise Exception(f"Parcels API request failed with status {response.status_code}: {response.text}")
+                        
+        except httpx.HTTPStatusError as e:
+            logger.error(f"PARCEL_HTTP_ERROR: HTTP error calling parcels API: {e.response.status_code}")
+            logger.error(f"PARCEL_HTTP_ERROR: Error response: {e.response.text}")
+            raise Exception(f"Parcels API HTTP error {e.response.status_code}: {e.response.text}")
+        except Exception as e:
+            logger.error(f"PARCEL_ERROR: Error calling parcels API: {str(e)}")
+            logger.error(f"PARCEL_ERROR: Stack trace: {traceback.format_exc()}")
+            raise Exception(f"Failed to create parcel: {str(e)}")
     
     async def initialize_cache(self):
         """Initialize all caches by fetching data from APIs"""
-        print("Initializing API cache... This may take a moment...")
+        logger.info("CACHE_INIT: Initializing API cache...")
         start_time = asyncio.get_event_loop().time()
         
         # Fetch all data sequentially to respect timing requirements
         try:
+            logger.info("   FETCH: Fetching cities...")
             await self.fetch_cities()
+            
+            logger.info("   FETCH: Fetching materials...")
             await self.fetch_materials() 
+            
             if self.companies_api_url and self.companies_api_url != "your_get_companies_api_url_here":
+                logger.info("   FETCH: Fetching companies...")
                 await self.fetch_companies()
+            else:
+                logger.info("   SKIP: Skipping companies fetch (URL not configured)")
+                
         except Exception as e:
-            print(f"Warning: Some API calls failed: {e}")
+            logger.warning(f"   WARNING: Some API calls failed: {str(e)}")
+            logger.error(f"   Stack trace: {traceback.format_exc()}")
         
         elapsed = asyncio.get_event_loop().time() - start_time
-        print(f"Cache initialized in {elapsed:.1f} seconds:")
-        print(f"   - Cities: {len(self.cities_cache)} items")
-        print(f"   - Materials: {len(self.materials_cache)} items")
-        print(f"   - Companies: {len(self.companies_cache)} items")
+        logger.info(f"CACHE_COMPLETE: Cache initialized in {elapsed:.1f} seconds:")
+        logger.info(f"   - Cities: {len(self.cities_cache)} items")
+        logger.info(f"   - Materials: {len(self.materials_cache)} items")
+        logger.info(f"   - Companies: {len(self.companies_cache)} items")

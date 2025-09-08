@@ -18,6 +18,7 @@ const ParcelForm = ({ onSubmit, isLoading, cities, materials }) => {
     if (useQuickForm) {
       // Convert quick form data to natural language message
       const { company, fromCity, toCity, weight, material } = quickFormData;
+
       const generatedMessage = `Create a parcel for ${company} from ${fromCity} to ${toCity}, ${weight}kg ${material}`;
       onSubmit(generatedMessage);
     } else {
